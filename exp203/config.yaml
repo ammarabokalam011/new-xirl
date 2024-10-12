@@ -1,0 +1,92 @@
+algorithm: tcc
+checkpointing_frequency: 200
+cudnn_benchmark: true
+cudnn_deterministic: false
+data:
+  batch_size: 4
+  downstream_action_class: !!python/tuple
+  - mediumstick
+  - longstick
+  - gripper
+  max_vids_per_class: -1
+  pretrain_action_class: !!python/tuple
+  - mediumstick
+  - longstick
+  - gripper
+  pretraining_video_sampler: random
+  root: /tmp/xirl/datasets/xmagical/
+data_augmentation:
+  eval_transforms:
+  - global_resize
+  image_size: !!python/tuple
+  - 112
+  - 112
+  train_transforms:
+  - random_resized_crop
+  - color_jitter
+  - grayscale
+  - gaussian_blur
+eval:
+  cycle_consistency:
+    stride: 1
+  distance: sqeuclidean
+  downstream_task_evaluators:
+  - reward_visualizer
+  - kendalls_tau
+  embedding_visualizer:
+    num_seqs: 2
+  eval_frequency: 500
+  kendalls_tau:
+    stride: 3
+  nearest_neighbour_visualizer:
+    num_videos: 4
+  reconstruction_visualizer:
+    num_frames: 2
+  reward_visualizer:
+    num_plots: 2
+  val_iters: 20
+frame_sampler:
+  all_sampler:
+    stride: 1
+  context_stride: 3
+  image_ext: '*.png'
+  num_context_frames: 1
+  num_frames_per_sequence: 40
+  strategy: uniform
+  strided_sampler:
+    offset: true
+    stride: 3
+  uniform_sampler:
+    offset: 0
+  window_sampler: {}
+logging_frequency: 100
+loss:
+  lifs:
+    temperature: 1.0
+  tcc:
+    cycle_length: 2
+    huber_delta: 0.1
+    label_smoothing: 0.1
+    loss_type: regression_mse
+    normalize_indices: true
+    similarity_type: l2
+    softmax_temperature: 1.0
+    stochastic_matching: false
+    variance_lambda: 0.001
+  tcn:
+    margin: 1.0
+    neg_radius: 4
+    num_pairs: 2
+    pos_radius: 1
+    temperature: 0.1
+model:
+  embedding_size: 32
+  learnable_temp: false
+  model_type: resnet18_linear
+  normalize_embeddings: false
+optim:
+  lr: 1.0e-05
+  train_max_iters: 4000
+  weight_decay: 0.0001
+root_dir: /tmp/xirl/pretrain_runs/
+seed: 1
