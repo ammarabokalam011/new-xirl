@@ -21,6 +21,10 @@ import torch
 from absl import app, flags
 from torch_geometric.data import DataLoader
 from xirl.models import GNNModel  # Assuming GNNModel is defined in xirl.models
+from torch_geometric.data import Data
+from torchvision import models, transforms
+from PIL import Image
+from sklearn.neighbors import NearestNeighbors
 
 FLAGS = flags.FLAGS
 
@@ -29,12 +33,26 @@ flags.DEFINE_string("experiment_path", None, "Path to model checkpoint.")
 flags.DEFINE_boolean("restore_checkpoint", True, "Restore model checkpoint.")
 flags.DEFINE_string("dataset_folder", './path_to_dataset', "Path to dataset folder containing video frames.")
 
-def extract_features(img_file):
-    """Extract features from an image file."""
-    img = cv2.imread(img_file)
-    img = cv2.resize(img, (128, 128))  # Resize to desired dimensions
-    img_tensor = torch.from_numpy(img).permute(2, 0, 1).float()[None] / 255.0  # Convert to tensor and normalize
-    return img_tensor.view(-1).numpy()  # Flattening for simplicity
+def extract_features(image_path):
+    resnet = models.resnet50(pretrained=True)
+    modules = list(resnet.children())[:-1]
+    resnet = torch.nn.Sequential(*modules)
+    resnet.eval()
+
+    preprocess = transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+
+    img = Image.open(image_path).convert('RGB')
+    img_tensor = preprocess(img).unsqueeze(0)
+
+    with torch.no_grad():
+        features = resnet(img_tensor)
+
+    return features.view(features.size(0), -1).numpy()
 
 def get(image_folder):
     """Extract features from all images in the specified folder."""
@@ -48,17 +66,6 @@ def get(image_folder):
         features.append(feature_vector)
 
     return np.array(features).squeeze()
-
-def calculate_rewards(embeddings):
-    """Calculate rewards based on embeddings."""
-    rewards = [np.linalg.norm(emb) for emb in embeddings]  # Example reward calculation (can be modified)
-    return np.array(rewards)
-
-def increasing_reward_loss(rewards):
-    """Calculate loss based on increasing reward condition."""
-    differences = rewards[1:] - rewards[:-1]  # Differences between consecutive rewards
-    loss = torch.sum(torch.relu(-differences))  # Penalize if any difference is negative (i.e., reward does not increase)
-    return loss
 
 def train(gnn_model, gnn_data_loader, optimizer, device):
     """Train the GNN model using graph data."""
@@ -110,29 +117,8 @@ def main(_):
         print(f'Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}')  # Print average loss
         
         # After training with graph data, calculate loss based on video frames
-        random_video_folder = random.choice(os.listdir(FLAGS.dataset_folder))  # Randomly select a video folder
-        full_video_path = os.path.join(FLAGS.dataset_folder, random_video_folder)
+
         
-        if os.path.isdir(full_video_path):
-            features = get(full_video_path)  # Extract features from selected video folder
-            
-            embeddings = []
-            for feature in features:
-                feature_tensor = torch.tensor(feature).float().to(device)  # Convert to tensor
-                
-                with torch.no_grad():
-                    emb = gnn_model(feature_tensor.unsqueeze(0)).cpu().numpy()  # Get embedding
-                
-                embeddings.append(emb)
-
-            rewards = calculate_rewards(embeddings)  # Calculate rewards based on embeddings
-            
-            rewards_tensor = torch.tensor(rewards).to(device)  # Convert rewards to tensor for loss calculation
-            
-            loss_from_video_frames = increasing_reward_loss(rewards_tensor)  # Calculate loss based on increasing reward condition
-            
-            print(f'Loss from video frames after epoch {epoch + 1}: {loss_from_video_frames.item()}') 
-
 if __name__ == "__main__":
     flags.mark_flag_as_required("experiment_path")
     flags.mark_flag_as_required("dataset_folder")
