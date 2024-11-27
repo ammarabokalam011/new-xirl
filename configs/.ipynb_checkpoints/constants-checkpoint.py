@@ -16,7 +16,7 @@
 """Settings we used for the CoRL 2021 experiments."""
 
 from typing import Dict
-from ml_collections import FrozenConfigDict
+from ml_collections.config_dict import FrozenConfigDict
 
 # The embodiments we used in the x-MAGICAL experiments.
 EMBODIMENTS = frozenset([

@@ -93,9 +93,7 @@ class ReplayBuffer:
 
   def sample(self, batch_size):
     """Sample an episode transition from the buffer."""
-    
 
-      
     idxs = np.random.randint(low=0, high=self.size, size=(batch_size,))
 
     return Batch(

@@ -18,6 +18,8 @@
 import abc
 import math
 from typing import List, Union
+import torch
+from torch_geometric.nn import SAGEConv, GATConv, LayerNorm
 
 import dataclasses
 import numpy as np
@@ -28,6 +30,7 @@ import torch.nn.functional as F
 from torchvision import models
 from torchvision.models.resnet import BasicBlock
 from torchvision.models.resnet import ResNet
+from torch.hub import load_state_dict_from_url
 from torch.hub import load_state_dict_from_url
 
 @dataclasses.dataclass
@@ -351,34 +354,89 @@ class Resnet18LinearEncoderAutoEncoderNet(ResNet):
     return out.squeeze(0)
 
 # Define the GNN Model
+# class GNNModel(nn.Module):
+#     def __init__(self, input_dim, hidden_dim, output_dim):
+#         super(GNNModel, self).__init__()
+#         self.conv1 = pyg_nn.GCNConv(input_dim, hidden_dim)
+#         self.conv2 = pyg_nn.GCNConv(hidden_dim, output_dim)
+#         self.fc = nn.Linear(output_dim, 32)  # Final embedding size set to 32
+
+#     def forward(self, x, edge_index, batch):
+#         x = self.conv1(x, edge_index)
+#         x = torch.relu(x)
+#         x = self.conv2(x, edge_index)
+
+#         # Apply global mean pooling to get a single graph-level embedding
+#         x = pyg_nn.global_mean_pool(x, batch)  # Shape: [num_graphs, output_dim]
+
+#         # Pass through a linear layer to get final embedding shape (32,)
+#         graph_embedding = self.fc(x)  # Shape: [num_graphs, 32]
+
+#         # Reshape to (num_graphs, 32) for each graph
+#         return graph_embedding
+
+
+# class GNNModel(torch.nn.Module):
+    
+#     def __init__(self, input_dim, hidden_dim_1, hidden_dim_2, output_dim):
+#         super().__init__()
+#         self.conv1 = SAGEConv(input_dim, hidden_dim_1)
+#         self.conv2 = GATConv(hidden_dim_1, hidden_dim_2)
+#         self.conv3 = GATConv(hidden_dim_2, output_dim)
+
+#     def forward(self, x, edge_index):
+#         x = self.conv1(x, edge_index)
+#         x = self.conv2(x, edge_index)
+#         x = self.conv3(x, edge_index)
+#         return x
+
+
 class GNNModel(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim):
-        """
-        Initialize the GNN model.
-
-        Args:
-            input_dim (int): Number of input features per node.
-            hidden_dim (int): Number of hidden features in the first layer.
-            output_dim (int): Number of output features.
-        """
         super(GNNModel, self).__init__()
-        self.conv1 = pyg_nn.GCNConv(input_dim, hidden_dim)
+        self.conv1 = pyg_nn.SAGEConv(input_dim, hidden_dim)
         self.conv2 = pyg_nn.GCNConv(hidden_dim, output_dim)
-        self.fc = nn.Linear(output_dim, output_dim)
+        self.fc = nn.Linear(output_dim, 32)  # Final embedding size set to 32
 
-    def forward(self, x, edge_index):
-        """
-        Forward pass through the GNN layers.
-
-        Args:
-            x (Tensor): Node feature matrix of shape [num_nodes, input_dim].
-            edge_index (Tensor): Graph connectivity in COO format with shape [2, num_edges].
-
-        Returns:
-            Tensor: Output features after passing through GNN layers.
-        """
+    def forward(self, x, edge_index, batch):
         x = self.conv1(x, edge_index)
         x = torch.relu(x)
         x = self.conv2(x, edge_index)
-        x = self.fc(x)
-        return x
+
+        # Apply global mean pooling to get a single graph-level embedding
+        x = pyg_nn.global_mean_pool(x, batch)
+
+        # Pass through a linear layer to get final embedding shape
+        graph_embedding = self.fc(x)
+
+        return graph_embedding
+
+class RewardLoss(nn.Module):
+    def __init__(self):
+        super(RewardLoss, self).__init__()
+        self.previous_reward = None  # To store the previous reward
+
+    def forward(self, predictions, targets):
+        # Calculate rewards based on your logic (to be defined by you)
+        current_reward = self.calculate_reward(predictions)
+
+        # Ensure each reward is greater than the previous one
+        if self.previous_reward is not None:
+            if current_reward <= self.previous_reward:
+                # Penalize the loss if current reward is not greater
+                loss = (self.previous_reward - current_reward).abs()  # Example penalty
+            else:
+                loss = torch.tensor(0.0)  # No penalty if the condition is satisfied
+        else:
+            loss = torch.tensor(0.0)  # No penalty for the first prediction
+
+        # Update previous reward
+        self.previous_reward = current_reward
+
+        return loss
+
+    def calculate_reward(self, predictions):
+        # Implement your reward calculation logic here
+        # This is a placeholder; replace it with your actual logic
+        rewards = ...  # Your logic to compute rewards from predictions
+        return rewards.mean()  # Return the mean of the computed rewards

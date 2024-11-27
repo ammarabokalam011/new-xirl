@@ -29,6 +29,7 @@ from torchvision import models
 from torchvision.models.resnet import BasicBlock
 from torchvision.models.resnet import ResNet
 from torch.hub import load_state_dict_from_url
+from torch.hub import load_state_dict_from_url
 
 @dataclasses.dataclass
 class SelfSupervisedOutput:
@@ -351,34 +352,40 @@ class Resnet18LinearEncoderAutoEncoderNet(ResNet):
     return out.squeeze(0)
 
 # Define the GNN Model
-class GNNModel(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim):
-        """
-        Initialize the GNN model.
+# class GNNModel(nn.Module):
+#     def __init__(self, input_dim, hidden_dim, output_dim):
+#         super(GNNModel, self).__init__()
+#         self.conv1 = pyg_nn.GCNConv(input_dim, hidden_dim)
+#         self.conv2 = pyg_nn.GCNConv(hidden_dim, output_dim)
+#         self.fc = nn.Linear(output_dim, 32)  # Final embedding size set to 32
 
-        Args:
-            input_dim (int): Number of input features per node.
-            hidden_dim (int): Number of hidden features in the first layer.
-            output_dim (int): Number of output features.
-        """
-        super(GNNModel, self).__init__()
-        self.conv1 = pyg_nn.GCNConv(input_dim, hidden_dim)
-        self.conv2 = pyg_nn.GCNConv(hidden_dim, output_dim)
-        self.fc = nn.Linear(output_dim, output_dim)
+#     def forward(self, x, edge_index, batch):
+#         x = self.conv1(x, edge_index)
+#         x = torch.relu(x)
+#         x = self.conv2(x, edge_index)
+
+#         # Apply global mean pooling to get a single graph-level embedding
+#         x = pyg_nn.global_mean_pool(x, batch)  # Shape: [num_graphs, output_dim]
+
+#         # Pass through a linear layer to get final embedding shape (32,)
+#         graph_embedding = self.fc(x)  # Shape: [num_graphs, 32]
+
+#         # Reshape to (num_graphs, 32) for each graph
+#         return graph_embedding
+
+import torch
+from torch_geometric.nn import SAGEConv, GATConv
+
+class GNNModel(torch.nn.Module):
+    
+    def __init__(self, input_dim, hidden_dim_1, hidden_dim_2, output_dim):
+        super().__init__()
+        self.conv1 = SAGEConv(input_dim, hidden_dim_1)
+        self.conv2 = GATConv(hidden_dim_1, hidden_dim_2)
+        self.conv3 = GATConv(hidden_dim_2, output_dim)
 
     def forward(self, x, edge_index):
-        """
-        Forward pass through the GNN layers.
-
-        Args:
-            x (Tensor): Node feature matrix of shape [num_nodes, input_dim].
-            edge_index (Tensor): Graph connectivity in COO format with shape [2, num_edges].
-
-        Returns:
-            Tensor: Output features after passing through GNN layers.
-        """
         x = self.conv1(x, edge_index)
-        x = torch.relu(x)
         x = self.conv2(x, edge_index)
-        x = self.fc(x)
+        x = self.conv3(x, edge_index)
         return x

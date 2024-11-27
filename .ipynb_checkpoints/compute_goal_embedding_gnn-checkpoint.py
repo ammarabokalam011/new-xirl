@@ -30,6 +30,7 @@ from xirl import common
 from xirl.models import SelfSupervisedModel
 from xirl.models import GNNModel
 from torch_geometric.data import DataLoader
+import random
 
 # pylint: disable=logging-fstring-interpolation
 
@@ -43,36 +44,29 @@ flags.DEFINE_boolean(
     "want to measure performance at random initialization.")
 
 
-# Function to embed using the GNN model
+
 def emb(model, data_loader, device):
     model.eval()
     gnn_embeddings = []
     init_embs = []
 
     with torch.no_grad():
-        for batch in data_loader:
-            x = batch.x.to(device)  # Node features
-            edge_index = batch.edge_index.to(device)  # Edge indices
-            
-            # Forward pass through the GNN model
-            out = model(x, edge_index)
-            gnn_embeddings.append(out.cpu().numpy())  # Move output back to CPU for numpy conversion
-            
-            # Assuming the first embedding is the initial embedding
-            init_embs.append(out[0].cpu().numpy())  # Capture the first node's embedding for distance calculation
+        for batch in tqdm(data_loader, desc="Computing embeddings", unit="batch"):
+            x = batch.x.to(device)
+            edge_index = batch.edge_index.to(device)
+            batch_indices = batch.batch.to(device)
 
-    # Concatenate all embeddings
+            out = model(x, edge_index)  # Use forward pass of LargeScaleGNN
+            gnn_embeddings.append(out.cpu().numpy())
+            init_embs.append(out[0].cpu().numpy())
+
     gnn_embeddings = np.concatenate(gnn_embeddings)
-
-    # Calculate mean embedding across all nodes
     mean_embedding = np.mean(gnn_embeddings, axis=0, keepdims=True)
-
-    # Calculate distance to mean embedding
     dist_to_mean = np.linalg.norm(init_embs - mean_embedding, axis=-1).mean()
-    distance_scale = 1.0 / dist_to_mean if dist_to_mean != 0 else float('inf')  # Avoid division by zero
+    distance_scale = 1.0 / dist_to_mean if dist_to_mean != 0 else float('inf')
+    
+    return mean_embedding, distance_scale
 
-    return gnn_embeddings, distance_scale
-	
 def setup(graph_data_path):
     # Load the graph data
     graph_data = torch.load(graph_data_path)
@@ -82,7 +76,7 @@ def setup(graph_data_path):
     edge_index = graph_data.edge_index  # Edge index tensor
 
     # Initialize GNN model
-    gnn_model = GNNModel(input_dim=node_features.size(1), hidden_dim=512, output_dim=128)  # Adjust dimensions as needed
+    gnn_model = GNNModel(input_dim=node_features.size(1), hidden_dim_1=3000, hidden_dim_2=265,output_dim=32)
 
     # Create a DataLoader for the graph data (assuming it's a single graph)
     gnn_data_loader = DataLoader([graph_data], batch_size=1)  # Adjust as needed
@@ -90,22 +84,22 @@ def setup(graph_data_path):
     return gnn_model, gnn_data_loader
 
 def main(_):
-    device = "cuda:0" # Use CUDA if available
+    device = "cuda:0"  # Use CUDA if available
     gnn_model, gnn_data_loader = setup(FLAGS.graph_data_path)
     gnn_model.to(device).eval()
 
-	# Clear cache before embedding
+    # Clear cache before embedding
     torch.cuda.empty_cache()
     gnn_embeddings, distance_scale_gnn = emb(gnn_model, gnn_data_loader, device)
-
-	# Save individual embeddings and distance scale to separate files
+    gnn_embeddings = gnn_embeddings * 10
+    # Save individual embeddings and distance scale to separate files
     utils.save_pickle(FLAGS.experiment_path, gnn_embeddings, "gnn_emb.pkl")
     utils.save_pickle(FLAGS.experiment_path, distance_scale_gnn, "gnn_distance_scale.pkl")
-    
-	# Clear cache before embedding
+
+    # Clear cache before embedding
     torch.cuda.empty_cache()
-	
+
 if __name__ == "__main__":
-  flags.mark_flag_as_required("experiment_path")
-  # flags.mark_flag_as_required("graph_data_path")
-  app.run(main)
+    flags.mark_flag_as_required("experiment_path")
+    # flags.mark_flag_as_required("graph_data_path")
+    app.run(main)

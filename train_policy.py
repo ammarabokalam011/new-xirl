@@ -34,8 +34,10 @@ from torchkit import experiment
 from torchkit import Logger
 from tqdm.auto import tqdm
 import utils
+
 from torchkit.utils import pdb_fallback
 from torchkit.utils.seed import seed_rngs, set_cudnn
+
 
 # pylint: disable=logging-fstring-interpolation
 
@@ -63,7 +65,6 @@ def evaluate(
   policy.eval()
   stats = collections.defaultdict(list)
   for _ in range(num_episodes):
-    # print(env)
     observation, done = env.reset(), False
     while not done:
       action = policy.act(observation, sample=False)
@@ -78,6 +79,7 @@ def evaluate(
 
 
 @pdb_fallback
+# @experiment.pdb_fallback
 def main(_):
   # Make sure we have a valid config that inherits all the keys defined in the
   # base config.
@@ -104,6 +106,9 @@ def main(_):
     logging.info("RL experiment seed: %d", FLAGS.seed)
     seed_rngs(FLAGS.seed)
     set_cudnn(config.cudnn_deterministic, config.cudnn_benchmark)
+
+    # experiment.seed_rngs(FLAGS.seed)
+    # experiment.set_cudnn(config.cudnn_deterministic, config.cudnn_benchmark)
   else:
     logging.info("No RNG seed has been set for this RL experiment.")
 
@@ -149,6 +154,7 @@ def main(_):
 
   logger = Logger(osp.join(exp_dir, "tb"), FLAGS.resume)
   i = 0  # Initialize i
+
   try:
     start = checkpoint_manager.restore_or_initialize()
     observation, done = env.reset(), False
@@ -159,6 +165,7 @@ def main(_):
         policy.eval()
         action = policy.act(observation, sample=True)
       next_observation, reward, done, info = env.step(action)
+      # next_observation, reward, terminated, truncated, info = env.step(action)
 
       if not done or "TimeLimit.truncated" in info:
         mask = 1.0

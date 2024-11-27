@@ -44,6 +44,16 @@ _MATPLOTLIB_DPI = flags.DEFINE_integer(
     100,
     "Dots per inch for PNG plots.")
 
+_PLOT_NAME = flags.DEFINE_string(
+    "plotname",
+    None,
+    "name of the plots.")
+
+_SAVE_NAME = flags.DEFINE_string(
+    "filename",
+    None,
+    "name of the plots.")
+
 
 def update_plotting_params(size):
   plt.rcParams.update({
@@ -79,7 +89,9 @@ class Experiment:
     subdirs = [f for f in self.path.iterdir() if f.is_dir()]
     # cd into their respective log subdirs.
     logdirs = [subdir / "tb" for subdir in subdirs]
+    print(logdirs)
     # Read Tensorboard logs.
+    logdirs = [self.path/ "0/tb",self.path/ "1/tb", self.path/ "2/tb", self.path/ "3/tb", self.path/ "4/tb"]
     logfiles = [list(logdir.iterdir())[0] for logdir in logdirs]
     data = []
     for logfile in logfiles:
@@ -99,13 +111,13 @@ class Experiment:
     return np.std(self.data, axis=0)
 
 
-def cross_shortstick(savename):
+def save_plot(savename, plotname):
   """Aggregates returns across experiment seeds and generates a figure."""
   # Note: Append baselines or other methods to this list.
   experiments = [
       Experiment(
           # Note: replace with an actual experiment path.
-          path="/home/user/xirl/exp/exp487",
+          path="/home/user/xirl/exp/exp571",
           # Note: You can customize the below attributes to your liking.
           name="XIRL",
           color="tab:red",
@@ -156,8 +168,12 @@ def cross_shortstick(savename):
 def main(_):
   os.makedirs(_PLOT_DIR.value, exist_ok=True)
   update_plotting_params(_MATPLOTLIB_SIZE.value)
-  cross_shortstick("cross_embodiment_shortstick")
+
+  # cross_shortstick("cross_embodiment_shortstick")
+  save_plot(_SAVE_NAME.value,_PLOT_NAME.value)
 
 
 if __name__ == "__main__":
+  flags.mark_flag_as_required("plotname")
+  flags.mark_flag_as_required("filename")
   app.run(main)

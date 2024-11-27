@@ -209,9 +209,9 @@ def wrap_learned_reward(env, config):
     env = wrappers.GoalClassifierLearnedVisualReward(**kwargs)
 
   elif config.reward_wrapper.type == "distance_to_goal":
-    kwargs["goal_emb"] = load_pickle(pretrained_path, "goal_emb.pkl")
+    kwargs["goal_emb"] = load_pickle(pretrained_path, "self_supervised_emb.pkl")
     kwargs["distance_scale"] = load_pickle(pretrained_path,
-                                           "distance_scale.pkl")
+                                           "self_supervised_distance_scale.pkl")
     env = wrappers.DistanceToGoalLearnedVisualReward(**kwargs)
 
   else:
@@ -257,9 +257,9 @@ def make_buffer(
     buffer = replay_buffer.ReplayBufferGoalClassifier(**kwargs)
 
   elif config.reward_wrapper.type == "distance_to_goal":
-    kwargs["goal_emb"] = load_pickle(pretrained_path, "goal_emb.pkl")
+    kwargs["goal_emb"] = load_pickle(pretrained_path, "self_supervised_emb.pkl")
     kwargs["distance_scale"] = load_pickle(pretrained_path,
-                                           "distance_scale.pkl")
+                                           "self_supervised_distance_scale.pkl")
     buffer = replay_buffer.ReplayBufferDistanceToGoal(**kwargs)
 
   else:
@@ -267,6 +267,55 @@ def make_buffer(
         f"{config.reward_wrapper.type} is not a valid reward wrapper.")
 
   return buffer
+
+
+def make_buffer_gnn(
+    env,
+    device,
+    config,
+):
+  """Replay buffer factory.
+
+  Args:
+    env: A `gym.Env`.
+    device: A `torch.device` object.
+    config: RL config dict, must inherit from base config defined in
+      `configs/rl_default.py`.
+
+  Returns:
+    ReplayBuffer.
+  """
+
+  kwargs = {
+      "obs_shape": env.observation_space.shape,
+      "action_shape": env.action_space.shape,
+      "capacity": config.replay_buffer_capacity,
+      "device": device,
+  }
+
+  pretrained_path = config.reward_wrapper.pretrained_path
+  if not pretrained_path:
+    return replay_buffer.ReplayBuffer(**kwargs)
+
+  model_config, model = load_model_checkpoint(pretrained_path, device)
+  kwargs["model"] = model
+  kwargs["res_hw"] = model_config.data_augmentation.image_size
+
+  if config.reward_wrapper.type == "goal_classifier":
+    buffer = replay_buffer.ReplayBufferGoalClassifier(**kwargs)
+
+  elif config.reward_wrapper.type == "distance_to_goal":
+    kwargs["goal_emb"] = load_pickle(pretrained_path, "gnn_emb.pkl")
+    kwargs["distance_scale"] = load_pickle(pretrained_path,
+                                           "gnn_distance_scale.pkl")
+    buffer = replay_buffer.ReplayBufferDistanceToGoal(**kwargs)
+
+  else:
+    raise ValueError(
+        f"{config.reward_wrapper.type} is not a valid reward wrapper.")
+
+  return buffer
+
 
 
 # ========================================= #
