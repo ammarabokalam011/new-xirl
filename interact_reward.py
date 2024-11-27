@@ -44,10 +44,18 @@ def main(_):
   env = utils.make_env(env_name, seed=0)
 
   # Reward learning wrapper.
+<<<<<<< HEAD
+  # if FLAGS.config.reward_wrapper.pretrained_path is not None:
+  #   env = utils.wrap_learned_reward(env, FLAGS.config)
+
+  viewer = KeyboardEnvInteractor(action_dim=env.action_space.shape[0])
+  print("Episode me: ")
+=======
   if FLAGS.config.reward_wrapper.pretrained_path is not None:
     env = utils.wrap_learned_reward(env, FLAGS.config)
 
   viewer = KeyboardEnvInteractor(action_dim=env.action_space.shape[0])
+>>>>>>> 9885e2cf21126bcce9c0f43a8e5fc657f7faa915
 
   env.reset()
   obs = env.render("rgb_array")
