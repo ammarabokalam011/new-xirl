@@ -19,6 +19,7 @@ import os
 import pickle
 import typing
 from typing import Any, Dict, Optional
+from PIL import Image
 
 from absl import logging
 import gym
@@ -35,6 +36,8 @@ from torchkit.experiment import git_revision_hash
 from xirl import common
 import xmagical
 import yaml
+from torchvision import models, transforms
+import torch.nn as nn
 
 # pylint: disable=logging-fstring-interpolation
 
@@ -337,3 +340,30 @@ def plot_reward(rews):
     ax.grid(visible=True, which="minor", linestyle="-", alpha=0.2)
   plt.minorticks_on()
   plt.show()
+
+
+
+def extract_features(image_path):
+    # Load the pre-trained ResNet-18 model
+    resnet = models.resnet18(weights="ResNet18_Weights.DEFAULT")
+    
+    # Replace the last fully connected layer to output embedding_size dimensions
+    resnet.fc = nn.Linear(resnet.fc.in_features, 32)
+    
+    # Set the model to evaluation mode
+    resnet.eval()
+
+    preprocess = transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+
+    img = Image.open(image_path).convert('RGB')
+    img_tensor = preprocess(img).unsqueeze(0)  # Add batch dimension
+
+    with torch.no_grad():
+        features = resnet(img_tensor)
+
+    return features.view(features.size(0), -1).numpy()  # Return as numpy array

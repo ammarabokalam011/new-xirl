@@ -1,92 +1,102 @@
-# coding=utf-8
-# Copyright 2024 The Google Research Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import os
 import glob
 import numpy as np
 import random
 import torch
+import torch.nn as nn
 from absl import app, flags
-from torch_geometric.data import DataLoader
+from torch_geometric.loader.dataloader import DataLoader
 from xirl.models import GNNModel  # Assuming GNNModel is defined in xirl.models
 from torch_geometric.data import Data
-from torchvision import models, transforms
-from PIL import Image
-from sklearn.neighbors import NearestNeighbors
+import logging
+from utils import extract_features
 
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("graph_data_path", './data/graphs/combined_graph.pt', "Path to graph path.")
 flags.DEFINE_string("experiment_path", None, "Path to model checkpoint.")
 flags.DEFINE_boolean("restore_checkpoint", True, "Restore model checkpoint.")
-flags.DEFINE_string("dataset_folder", './path_to_dataset', "Path to dataset folder containing video frames.")
+flags.DEFINE_string("dataset_folder", None, "Path to dataset folder containing video frames.")
 
-def extract_features(image_path):
-    resnet = models.resnet50(pretrained=True)
-    modules = list(resnet.children())[:-1]
-    resnet = torch.nn.Sequential(*modules)
-    resnet.eval()
+class RewardLoss(nn.Module):
+    def __init__(self):
+        super(RewardLoss, self).__init__()
+        self.previous_reward = None  # To store the previous reward
 
-    preprocess = transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(224),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
+    def forward(self, predictions, device):
+        current_reward = self.calculate_reward(predictions, device)
+        print('Current Reward:', current_reward.item())
 
-    img = Image.open(image_path).convert('RGB')
-    img_tensor = preprocess(img).unsqueeze(0)
+        if self.previous_reward is None:
+            self.previous_reward = torch.tensor(0.0, device=current_reward.device)  # Initialize as tensor
 
-    with torch.no_grad():
-        features = resnet(img_tensor)
+        # Calculate loss based on the difference in rewards
+        loss = (current_reward - self.previous_reward).clamp(min=0)  # Ensure non-negative loss
 
-    return features.view(features.size(0), -1).numpy()
+        # Update previous reward
+        self.previous_reward = current_reward.detach()  # Detach to avoid tracking gradients
+        return loss  # Return the loss directly; it will automatically have requires_grad=True if computed from tensors
 
-def get(image_folder):
-    """Extract features from all images in the specified folder."""
-    image_files = sorted(glob.glob(os.path.join(image_folder, '*.png')))
-    features = []
+    def calculate_reward(self, predictions, device):
+        """Calculate rewards based on distance between predictions and video frame features."""
+        
+        video_folder = random.choice(os.listdir(FLAGS.dataset_folder))
+        video_features = self.get(os.path.join(FLAGS.dataset_folder, video_folder))
 
-    print(f"Extracting features from {len(image_files)} images in {image_folder}...")
+        predictions = predictions.to(device)
 
-    for img_file in image_files:
-        feature_vector = extract_features(img_file)
-        features.append(feature_vector)
+        if predictions.dim() == 2:  # If shape is [1, 32], expand it
+            predictions = predictions.unsqueeze(1).expand(-1, len(video_features), -1)
 
-    return np.array(features).squeeze()
+        distances = []
+        for i in range(len(video_features)):
+            distance = np.linalg.norm(video_features[i] - predictions[0][i].detach().cpu().numpy())
+            distances.append(max(0.0, distance))
 
+        average_distance = np.mean(distances)
+        
+        return torch.tensor(max(0.0, average_distance), dtype=torch.float32, device=predictions.device)  # Ensure this is a tensor
+    
+    def get(self, image_folder):
+        """Extract features from all images in the specified folder."""
+        image_files = sorted(glob.glob(os.path.join(image_folder, '*.png')))
+        features = []
+
+        logging.info(f"Extracting features from {len(image_files)} images in {image_folder}...")
+
+        for img_file in image_files:
+            feature_vector = extract_features(img_file)
+            features.append(feature_vector)
+
+        return np.array(features).squeeze()
+    
 def train(gnn_model, gnn_data_loader, optimizer, device):
     """Train the GNN model using graph data."""
     gnn_model.train()  # Set the model to training mode
     total_loss = 0
     
+    reward_loss_fn = RewardLoss()  # Instantiate RewardLoss
+    
     for batch in gnn_data_loader:
-        optimizer.zero_grad()  # Clear gradients
+        # optimizer.zero_grad()  # Clear gradients
         
         batch = batch.to(device)  # Move batch to device
         predictions = gnn_model(batch.x, batch.edge_index, batch.batch)  # Forward pass
+        logging.info(f'predictions: {predictions}')
         
-        # Here you can define your ground truth labels if needed
-        # loss = custom_loss_fn(predictions, batch.y) 
-        loss = ...  # Define your loss calculation based on predictions and targets
+        loss = reward_loss_fn(predictions, device)  # Calculate custom loss
         
+        print('Loss:', loss.item())  # Print loss for debugging
+        
+        # if loss.requires_grad:  # Ensure that loss requires gradient tracking
+        loss.requires_grad = True
+
         loss.backward()  # Backpropagation step
+        
         optimizer.step()  # Update weights
         
         total_loss += loss.item()
-
+        
     return total_loss / len(gnn_data_loader)
 
 def setup(graph_data_path):
@@ -96,28 +106,26 @@ def setup(graph_data_path):
     node_features = graph_data.x  # Node features tensor
     edge_index = graph_data.edge_index  # Edge index tensor
     
-    gnn_model = GNNModel(input_dim=node_features.size(1), hidden_dim_1=2000, hidden_dim_2=265, output_dim=32) 
-    gnn_data_loader = DataLoader([graph_data], batch_size=10)  # Create a DataLoader for the graph data
+    gnn_model = GNNModel(input_dim=node_features.size(1), hidden_dim=1000, output_dim=32) 
+    gnn_data_loader = DataLoader([graph_data], batch_size=1)  # Create a DataLoader for the graph data
 
     return gnn_model, gnn_data_loader
 
 def main(_):
     device = "cuda:0" if torch.cuda.is_available() else "cpu"  # Use CUDA if available
-    
+
+    logging.basicConfig(level=logging.INFO)
     gnn_model, gnn_data_loader = setup(FLAGS.graph_data_path)
     
     gnn_model.to(device)  # Move model to device
-    optimizer = torch.optim.Adam(gnn_model.parameters(), lr=0.001)  # Initialize optimizer
+    optimizer = torch.optim.Adam(gnn_model.parameters(), lr=0.1)  # Initialize optimizer
     
-    num_epochs = 10  # Set the number of epochs
+    num_epochs = 3000  # Set the number of epochs
     
     for epoch in range(num_epochs):
         avg_loss = train(gnn_model, gnn_data_loader, optimizer, device)
         
-        print(f'Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}')  # Print average loss
-        
-        # After training with graph data, calculate loss based on video frames
-
+        logging.info(f'Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}')  # Print average loss
         
 if __name__ == "__main__":
     flags.mark_flag_as_required("experiment_path")

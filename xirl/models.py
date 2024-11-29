@@ -14,23 +14,22 @@
 # limitations under the License.
 
 """Self supervised models."""
-
+import os
+import glob
+import random
+from torchvision import models, transforms
+from PIL import Image
 import abc
 import math
 from typing import List, Union
-import torch
 from torch_geometric.nn import SAGEConv, GATConv, LayerNorm
-
 import dataclasses
 import numpy as np
 import torch
 import torch.nn as nn
 import torch_geometric.nn as pyg_nn
 import torch.nn.functional as F
-from torchvision import models
-from torchvision.models.resnet import BasicBlock
-from torchvision.models.resnet import ResNet
-from torch.hub import load_state_dict_from_url
+from torchvision.models.resnet import BasicBlock,ResNet
 from torch.hub import load_state_dict_from_url
 
 @dataclasses.dataclass
@@ -411,32 +410,3 @@ class GNNModel(nn.Module):
 
         return graph_embedding
 
-class RewardLoss(nn.Module):
-    def __init__(self):
-        super(RewardLoss, self).__init__()
-        self.previous_reward = None  # To store the previous reward
-
-    def forward(self, predictions, targets):
-        # Calculate rewards based on your logic (to be defined by you)
-        current_reward = self.calculate_reward(predictions)
-
-        # Ensure each reward is greater than the previous one
-        if self.previous_reward is not None:
-            if current_reward <= self.previous_reward:
-                # Penalize the loss if current reward is not greater
-                loss = (self.previous_reward - current_reward).abs()  # Example penalty
-            else:
-                loss = torch.tensor(0.0)  # No penalty if the condition is satisfied
-        else:
-            loss = torch.tensor(0.0)  # No penalty for the first prediction
-
-        # Update previous reward
-        self.previous_reward = current_reward
-
-        return loss
-
-    def calculate_reward(self, predictions):
-        # Implement your reward calculation logic here
-        # This is a placeholder; replace it with your actual logic
-        rewards = ...  # Your logic to compute rewards from predictions
-        return rewards.mean()  # Return the mean of the computed rewards

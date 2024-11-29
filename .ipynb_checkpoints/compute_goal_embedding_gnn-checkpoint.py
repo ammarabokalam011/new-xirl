@@ -31,7 +31,7 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string("graph_data_path", './data/graphs/combined_graph.pt', "Path to graph path.")
 flags.DEFINE_string("experiment_path", None, "Path to model checkpoint.")
 flags.DEFINE_boolean("restore_checkpoint", True, "Restore model checkpoint.")
-flags.DEFINE_string("dataset_folder", './path_to_dataset', "Path to dataset folder containing video frames.")
+flags.DEFINE_string("dataset_folder", None, "Path to dataset folder containing video frames.")
 
 def extract_features(image_path):
     resnet = models.resnet50(pretrained=True)
@@ -67,17 +67,6 @@ def get(image_folder):
 
     return np.array(features).squeeze()
 
-def calculate_rewards(embeddings):
-    """Calculate rewards based on embeddings."""
-    rewards = [np.linalg.norm(emb) for emb in embeddings]  # Example reward calculation (can be modified)
-    return np.array(rewards)
-
-def increasing_reward_loss(rewards):
-    """Calculate loss based on increasing reward condition."""
-    differences = rewards[1:] - rewards[:-1]  # Differences between consecutive rewards
-    loss = torch.sum(torch.relu(-differences))  # Penalize if any difference is negative (i.e., reward does not increase)
-    return loss
-
 def train(gnn_model, gnn_data_loader, optimizer, device):
     """Train the GNN model using graph data."""
     gnn_model.train()  # Set the model to training mode
@@ -91,7 +80,7 @@ def train(gnn_model, gnn_data_loader, optimizer, device):
         
         # Here you can define your ground truth labels if needed
         # loss = custom_loss_fn(predictions, batch.y) 
-        loss = ...  # Define your loss calculation based on predictions and targets
+        loss =  calculate_loss(predictions) # Define your loss calculation based on predictions and targets
         
         loss.backward()  # Backpropagation step
         optimizer.step()  # Update weights
@@ -99,6 +88,9 @@ def train(gnn_model, gnn_data_loader, optimizer, device):
         total_loss += loss.item()
 
     return total_loss / len(gnn_data_loader)
+
+def calculate_loss(cur_emb):
+    return 0
 
 def setup(graph_data_path):
     """Load graph data and initialize GNN model."""
@@ -128,29 +120,8 @@ def main(_):
         print(f'Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}')  # Print average loss
         
         # After training with graph data, calculate loss based on video frames
-        random_video_folder = random.choice(os.listdir(FLAGS.dataset_folder))  # Randomly select a video folder
-        full_video_path = os.path.join(FLAGS.dataset_folder, random_video_folder)
+
         
-        if os.path.isdir(full_video_path):
-            features = get(full_video_path)  # Extract features from selected video folder
-            
-            embeddings = []
-            for feature in features:
-                feature_tensor = torch.tensor(feature).float().to(device)  # Convert to tensor
-                
-                with torch.no_grad():
-                    emb = gnn_model(feature_tensor.unsqueeze(0)).cpu().numpy()  # Get embedding
-                
-                embeddings.append(emb)
-
-            rewards = calculate_rewards(embeddings)  # Calculate rewards based on embeddings
-            
-            rewards_tensor = torch.tensor(rewards).to(device)  # Convert rewards to tensor for loss calculation
-            
-            loss_from_video_frames = increasing_reward_loss(rewards_tensor)  # Calculate loss based on increasing reward condition
-            
-            print(f'Loss from video frames after epoch {epoch + 1}: {loss_from_video_frames.item()}') 
-
 if __name__ == "__main__":
     flags.mark_flag_as_required("experiment_path")
     flags.mark_flag_as_required("dataset_folder")

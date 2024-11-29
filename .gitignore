@@ -2,3 +2,5 @@
 exp/
 data/
 bin/
+.ipynb_checkpoints/
+__pycache__/
