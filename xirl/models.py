@@ -32,6 +32,7 @@ import torch.nn.functional as F
 from torchvision.models.resnet import BasicBlock,ResNet
 from torch.hub import load_state_dict_from_url
 
+
 @dataclasses.dataclass
 class SelfSupervisedOutput:
   """The output of a self-supervised model."""
@@ -391,16 +392,18 @@ class Resnet18LinearEncoderAutoEncoderNet(ResNet):
 
 
 class GNNModel(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim):
+    def __init__(self, input_dim, hidden_dim1, hidden_dim2, output_dim):
         super(GNNModel, self).__init__()
-        self.conv1 = pyg_nn.SAGEConv(input_dim, hidden_dim)
-        self.conv2 = pyg_nn.GCNConv(hidden_dim, output_dim)
+        self.conv1 = pyg_nn.SAGEConv(input_dim, hidden_dim1)
+        self.conv2 = pyg_nn.GCNConv(hidden_dim1, hidden_dim2)
+        self.conv3 = pyg_nn.GCNConv(hidden_dim2, output_dim)
+
         self.fc = nn.Linear(output_dim, 32)  # Final embedding size set to 32
 
-    def forward(self, x, edge_index, batch):
+    def forward(self, x, edge_index, batch):        
         x = self.conv1(x, edge_index)
-        x = torch.relu(x)
         x = self.conv2(x, edge_index)
+        x = self.conv3(x, edge_index)
 
         # Apply global mean pooling to get a single graph-level embedding
         x = pyg_nn.global_mean_pool(x, batch)
