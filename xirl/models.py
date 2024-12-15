@@ -1,18 +1,3 @@
-# coding=utf-8
-# Copyright 2024 The Google Research Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 """Self supervised models."""
 import os
 import glob
@@ -151,6 +136,26 @@ class Resnet18LinearEncoderNet(SelfSupervisedModel):
     # Encoder.
     self.encoder = nn.Linear(num_ftrs, embedding_size)
 
+class Resnet18LinearEncoderNetGNN(SelfSupervisedModel):
+    """A resnet18 backbone with a linear encoder head."""
+
+    def __init__(self, embedding_size, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # Visual backbone.
+        resnet = models.resnet18(pretrained=True)
+        num_ftrs = resnet.fc.in_features
+        layers_ = list(resnet.children())[:-1]
+        self.backbone = nn.Sequential(*layers_)
+
+        # Encoder.
+        self.encoder = nn.Linear(num_ftrs, embedding_size)
+
+    def forward(self, x):
+        x = self.backbone(x)
+        x = x.view(x.size(0), -1)  # Flatten
+        x = self.encoder(x)
+        return x
 
 class GoalClassifier(SelfSupervisedModel):
   """A resnet18 backbone with a binary classification head."""

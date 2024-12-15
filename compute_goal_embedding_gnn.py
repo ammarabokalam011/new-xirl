@@ -6,12 +6,8 @@ import torch
 import torch.nn as nn
 from absl import app, flags
 from torch_geometric.loader import DataLoader
-from torch_geometric.data import Data
-from torchvision import models, transforms
-from PIL import Image
 import logging
-from xirl.models import GNNModel  # Assuming GNNModel is defined in xirl.models
-from utils import extract_features
+from xirl.models import GNNModel, Resnet18LinearEncoderNetGNN  # Assuming GNNModel is defined in xirl.models
 import utils
 FLAGS = flags.FLAGS
 
@@ -19,6 +15,7 @@ flags.DEFINE_string("graph_data_path", './data/graphs/combined_graph.pt', "Path 
 flags.DEFINE_string("experiment_path", None, "Path to model checkpoint.")
 flags.DEFINE_boolean("restore_checkpoint", True, "Restore model checkpoint.")
 flags.DEFINE_string("dataset_folder", None, "Path to dataset folder containing video frames.")
+
 
 def get( image_folder):
     """Extract features from all images in the specified folder."""
@@ -40,7 +37,7 @@ def get_distances(predictions,video_features):
         distances.append(max(0.0, distance))
     return distances
 
-def train(gnn_model, gnn_data_loader, optimizer, device):
+def train(gnn_model, gnn_data_loader, resnet_model, optimizer, device):
     """Train the GNN model using graph data."""
     gnn_model.train()  # Set the model to training mode
     total_loss = 0
@@ -49,9 +46,12 @@ def train(gnn_model, gnn_data_loader, optimizer, device):
     gnn_embeddings = []
     init_embs = []
 
+        
+        
+
     for batch in gnn_data_loader:
         optimizer.zero_grad()  # Clear gradients
-        torch.no_grad()
+        # torch.no_grad()
         batch = batch.to(device)  # Move batch to device
         predictions = gnn_model(batch.x, batch.edge_index, batch.batch)  # Forward pass
         logging.info(f'Predictions: {predictions}')  # Debugging output
@@ -65,23 +65,38 @@ def train(gnn_model, gnn_data_loader, optimizer, device):
         video_features = torch.tensor(video_features, device=device)
         loss = nn.MSELoss()
         # predictions_rep = predictions.repeat(video_features.shape[0], 1)
+        video_features_tensor = torch.tensor(video_features).to(device)
         
-        logging.info(f'predictions size: {predictions.size}, video_features size: {video_features[-1].size}')  # Debugging output
-        logging.info(f'type(size) : {type(video_features[-1].size)}, type(size) :{type(predictions.size)}')
-        goal = torch.tensor(video_features[-1], requires_grad=True, device=device)
-        # predictions = predictions.unsqueeze(1)
+        # Extract features using ResNet
+        resnet_embeddings = resnet_model(video_features_tensor)
         
-        output = loss(predictions,goal)
-        output.backward()
+        
+        output_loss = loss_fn(predictions, resnet_embeddings)
+        
+        output_loss.backward()
         
         optimizer.step()  # Update weights
             
         gnn_embeddings.append(predictions.detach().cpu().numpy())  
-            # Capture the first node's embedding for distance calculation
-        init_embs.append(predictions.detach().cpu().numpy()[0])    
-        total_loss += output
-    # Concatenate all embeddings
+        
+        total_loss += output_loss.item()
+        
+        # logging.info(f'predictions size: {predictions.size}, video_features size: {video_features[-1].size}')  # Debugging output
+        # logging.info(f'type(size) : {type(video_features[-1].size)}, type(size) :{type(predictions.size)}')
+        # goal = torch.tensor(video_features[-1], requires_grad=True, device=device)
+        # predictions = predictions.unsqueeze(1)
+        
+        # output = loss(predictions,goal)
+        # output.backward()
+        
+        # optimizer.step()  # Update weights
+            
+        # gnn_embeddings.append(predictions.detach().cpu().numpy())  
+        #     # Capture the first node's embedding for distance calculation
+        # init_embs.append(predictions.detach().cpu().numpy()[0])    
+        # total_loss += output
     
+    # Concatenate all embeddings
     gnn_embeddings = np.concatenate(gnn_embeddings)
 
     # Calculate mean embedding across all nodes
@@ -96,9 +111,8 @@ def train(gnn_model, gnn_data_loader, optimizer, device):
         distance_scale = 1.0 / dist_to_mean
     return gnn_embeddings, distance_scale, total_loss / len(gnn_data_loader)
 
-
 def setup(graph_data_path):
-    """Load graph data and initialize GNN model."""
+    """Load graph data and initialize GNN and ResNet model."""
     graph_data = torch.load(graph_data_path)  # Load the graph data
     
     node_features = graph_data.x  # Node features tensor
@@ -106,21 +120,35 @@ def setup(graph_data_path):
     
     logging.info(f'Node Features Shape: {node_features.shape}, Edge Index Shape: {edge_index.shape}')
     
-    gnn_model = GNNModel(input_dim=node_features.size(1), hidden_dim1=1000, hidden_dim2=250,output_dim=32) 
+    gnn_model = GNNModel(input_dim=node_features.size(1), hidden_dim1=1000, hidden_dim2=250, output_dim=32) 
     gnn_data_loader = DataLoader([graph_data], batch_size=1)  # Create a DataLoader for the graph data
 
-    return gnn_model, gnn_data_loader
+
+    # Initialize ResNet model with required parameters
+    num_ctx_frames = 5  # Example value, adjust as necessary
+    normalize_embeddings = True  # Example value, adjust as necessary
+    learnable_temp = False  # Example value, adjust as necessary
+    # Initialize ResNet model
+    resnet_model = Resnet18LinearEncoderNetGNN(num_ctx_frames, normalize_embeddings, learnable_temp, embedding_size=32)
+    resnet_model.eval()  # Set to evaluation mode
+
+    return gnn_model, gnn_data_loader, resnet_model
+
+
 
 def main(_):
     device = "cuda:0" if torch.cuda.is_available() else "cpu"  # Use CUDA if available
 
     logging.basicConfig(level=logging.INFO)
-    gnn_model, gnn_data_loader = setup(FLAGS.graph_data_path)
     
-    gnn_model.to(device)  # Move model to device
-    optimizer = torch.optim.Adam(gnn_model.parameters(), lr=0.001)  # Initialize optimizer
+    gnn_model, gnn_data_loader, resnet_model = setup(FLAGS.graph_data_path)
     
-    num_epochs = 30  # Set the number of epochs
+    gnn_model.to(device)  
+    resnet_model.to(device)  # Move ResNet model to device
+
+    optimizer = torch.optim.Adam(gnn_model.parameters(), lr=0.001)  
+    
+    num_epochs = 30  
     
     for epoch in range(num_epochs):
         gnn_embeddings, distance_scale,avg_loss = train(gnn_model, gnn_data_loader, optimizer, device)
@@ -128,8 +156,6 @@ def main(_):
         logging.info(f'Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.4f}')  # Print average loss
         logging.info(f'Epoch {epoch + 1} - Embeddings shape: {gnn_embeddings.shape}, Distance Scale: {distance_scale:.4f}')
 
-    # Clear cache before embedding
-    torch.cuda.empty_cache()
     
 	# Save individual embeddings and distance scale to separate files
     utils.save_pickle(FLAGS.experiment_path, gnn_embeddings, "gnn_emb.pkl")
